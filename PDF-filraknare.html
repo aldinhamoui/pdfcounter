@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Sidräknare</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- PDF.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // Configure Tailwind
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .drop-zone {
+            transition: all 0.3s ease;
+            background-image: url("data:image/svg+xml,%3csvg width='100%25' height='100%25' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='100%25' height='100%25' fill='none' rx='16' ry='16' stroke='%23CBD5E1FF' stroke-width='3' stroke-dasharray='12%2c 12' stroke-dashoffset='0' stroke-linecap='square'/%3e%3c/svg%3e");
+        }
+        .drop-zone.active {
+            background-color: #f0f9ff;
+            background-image: url("data:image/svg+xml,%3csvg width='100%25' height='100%25' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='100%25' height='100%25' fill='none' rx='16' ry='16' stroke='%230EA5E9FF' stroke-width='3' stroke-dasharray='12%2c 12' stroke-dashoffset='0' stroke-linecap='square'/%3e%3c/svg%3e");
+            transform: scale(1.01);
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .file-item {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen font-sans flex flex-col">
+
+    <div class="max-w-4xl mx-auto p-4 md:p-8 flex-grow w-full">
+        <!-- Header -->
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl md:text-4xl font-bold text-slate-900 mb-2">
+                <i class="fas fa-file-pdf text-red-500 mr-2"></i>PDF Sidräknare
+            </h1>
+            <p class="text-slate-500">Ladda upp dina PDF-filer för att snabbt räkna antalet sidor.</p>
+        </header>
+
+        <!-- Stats Card -->
+        <div class="grid grid-cols-2 gap-4 mb-6">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col items-center justify-center">
+                <span class="text-slate-400 text-sm font-medium uppercase tracking-wider">Antal Filer</span>
+                <span id="totalFilesDisplay" class="text-3xl font-bold text-slate-700">0</span>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col items-center justify-center">
+                <span class="text-slate-400 text-sm font-medium uppercase tracking-wider">Totalt Antal Sidor</span>
+                <span id="totalPagesDisplay" class="text-3xl font-bold text-brand-600">0</span>
+            </div>
+        </div>
+
+        <!-- Upload Zone -->
+        <div id="dropZone" class="drop-zone bg-white rounded-2xl p-8 md:p-12 text-center cursor-pointer mb-8 relative group hover:bg-slate-50">
+            <input type="file" id="fileInput" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" multiple accept=".pdf">
+            
+            <div class="pointer-events-none">
+                <div class="mb-4">
+                    <i class="fas fa-cloud-upload-alt text-5xl text-slate-300 group-hover:text-brand-500 transition-colors"></i>
+                </div>
+                <h3 class="text-xl font-semibold text-slate-700 mb-2">Dra och släpp filer här</h3>
+                <p class="text-slate-500 text-sm mb-4">eller klicka för att välja från datorn</p>
+                <span class="inline-block bg-brand-100 text-brand-700 px-3 py-1 rounded-full text-xs font-semibold">Endast PDF</span>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div id="actionButtons" class="hidden flex justify-end mb-4">
+            <button onclick="clearList()" class="text-red-500 hover:text-red-700 text-sm font-medium flex items-center transition-colors">
+                <i class="fas fa-trash-alt mr-2"></i>Rensa listan
+            </button>
+        </div>
+
+        <!-- File List -->
+        <div id="fileListContainer" class="space-y-3">
+            <!-- Files will be injected here -->
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="py-6 text-center text-slate-400 text-xs">
+        <p>Skapad av Aldin Hamoui</p>
+    </footer>
+
+    <script>
+        // Set up PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // State
+        let filesData = [];
+        
+        // DOM Elements
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileListContainer = document.getElementById('fileListContainer');
+        const totalFilesDisplay = document.getElementById('totalFilesDisplay');
+        const totalPagesDisplay = document.getElementById('totalPagesDisplay');
+        const actionButtons = document.getElementById('actionButtons');
+
+        // Event Listeners for Drag & Drop
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('active');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('active');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+        fileInput.addEventListener('change', handleFiles, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles({ target: { files: files } });
+        }
+
+        function handleFiles(e) {
+            const files = [...e.target.files];
+            const pdfFiles = files.filter(file => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
+
+            if (files.length !== pdfFiles.length) {
+                showToast('Vissa filer ignorerades (endast PDF stöds för pålitlig räkning).', 'warning');
+            }
+
+            if (pdfFiles.length > 0) {
+                processFiles(pdfFiles);
+                actionButtons.classList.remove('hidden');
+            }
+            
+            // Reset input so same files can be selected again if cleared
+            fileInput.value = ''; 
+        }
+
+        async function processFiles(files) {
+            for (const file of files) {
+                // Create UI element immediately with loading state
+                const fileId = Date.now() + Math.random().toString(36).substr(2, 9);
+                createFileRow(fileId, file.name);
+                
+                try {
+                    const pageCount = await countPdfPages(file);
+                    updateFileRowSuccess(fileId, pageCount, file.size);
+                    
+                    // Add to state
+                    filesData.push({
+                        id: fileId,
+                        name: file.name,
+                        pages: pageCount,
+                        size: file.size
+                    });
+                    
+                    updateTotals();
+                } catch (error) {
+                    console.error(error);
+                    updateFileRowError(fileId);
+                }
+            }
+        }
+
+        function countPdfPages(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const typedarray = new Uint8Array(e.target.result);
+                    
+                    // Load the PDF document
+                    pdfjsLib.getDocument(typedarray).promise.then(function(pdf) {
+                        resolve(pdf.numPages);
+                    }).catch(function(error) {
+                        reject(error);
+                    });
+                };
+                reader.onerror = function(error) {
+                    reject(error);
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // --- UI Rendering Functions ---
+
+        function createFileRow(id, name) {
+            const div = document.createElement('div');
+            div.id = `file-${id}`;
+            div.className = 'file-item bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between';
+            div.innerHTML = `
+                <div class="flex items-center min-w-0 flex-1 mr-4">
+                    <div class="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center text-red-500 mr-4 flex-shrink-0">
+                        <i class="fas fa-file-pdf text-xl"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <h4 class="text-slate-800 font-medium truncate" title="${name}">${name}</h4>
+                        <p class="text-xs text-slate-400 flex items-center mt-1 status-text">
+                            <i class="fas fa-circle-notch fa-spin mr-2"></i>Räknar sidor...
+                        </p>
+                    </div>
+                </div>
+                <div class="text-right flex-shrink-0">
+                    <span class="text-2xl font-bold text-slate-300 page-count">-</span>
+                    <span class="text-xs text-slate-400 block uppercase">Sidor</span>
+                </div>
+            `;
+            fileListContainer.prepend(div);
+        }
+
+        function updateFileRowSuccess(id, count, size) {
+            const row = document.getElementById(`file-${id}`);
+            if (!row) return;
+
+            const formattedSize = formatBytes(size);
+            const statusText = row.querySelector('.status-text');
+            statusText.innerHTML = `${formattedSize}`; // Just show size on success
+
+            const countEl = row.querySelector('.page-count');
+            countEl.innerText = count;
+            countEl.classList.remove('text-slate-300');
+            countEl.classList.add('text-brand-600');
+        }
+
+        function updateFileRowError(id) {
+            const row = document.getElementById(`file-${id}`);
+            if (!row) return;
+
+            const statusText = row.querySelector('.status-text');
+            statusText.innerHTML = `<span class="text-red-500"><i class="fas fa-exclamation-circle mr-1"></i>Kunde inte läsa filen</span>`;
+
+            const countEl = row.querySelector('.page-count');
+            countEl.innerText = "0";
+            countEl.classList.add('text-red-300');
+        }
+
+        function updateTotals() {
+            const totalFiles = filesData.length;
+            const totalPages = filesData.reduce((sum, file) => sum + file.pages, 0);
+
+            // Animate numbers
+            animateValue(totalFilesDisplay, parseInt(totalFilesDisplay.innerText), totalFiles, 500);
+            animateValue(totalPagesDisplay, parseInt(totalPagesDisplay.innerText), totalPages, 500);
+        }
+
+        function clearList() {
+            fileListContainer.innerHTML = '';
+            filesData = [];
+            updateTotals();
+            actionButtons.classList.add('hidden');
+        }
+
+        // --- Utilities ---
+
+        function formatBytes(bytes, decimals = 1) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        function animateValue(obj, start, end, duration) {
+            let startTimestamp = null;
+            const step = (timestamp) => {
+                if (!startTimestamp) startTimestamp = timestamp;
+                const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                obj.innerHTML = Math.floor(progress * (end - start) + start);
+                if (progress < 1) {
+                    window.requestAnimationFrame(step);
+                }
+            };
+            window.requestAnimationFrame(step);
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            const colorClass = type === 'warning' ? 'bg-orange-500' : 'bg-slate-800';
+            toast.className = `fixed bottom-4 right-4 ${colorClass} text-white px-6 py-3 rounded-lg shadow-lg transform transition-all duration-300 translate-y-20 opacity-0 z-50 flex items-center`;
+            toast.innerHTML = `<span>${message}</span>`;
+            
+            document.body.appendChild(toast);
+
+            // Animate in
+            setTimeout(() => {
+                toast.classList.remove('translate-y-20', 'opacity-0');
+            }, 10);
+
+            // Animate out
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
